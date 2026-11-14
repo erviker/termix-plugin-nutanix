@@ -9,7 +9,7 @@ The Nutanix plugin connects Termix to Nutanix Prism Central (and optionally Pris
 
 ## Use it
 
-- Open the **Nutanix** tab from the sidebar to browse Virtual Machines, AHV Hosts, Storage Containers, and Clusters.
+- Open the **Nutanix** tab from the sidebar to browse Virtual Machines (with per-VM CPU, RAM, disk, and IOPS/bandwidth telemetry), AHV Nodes (with per-node resource tiles and expandable VM overviews), Storage Containers, and Clusters.
 - VMs whose primary or secondary NIC IPs (or VM name) match an existing Termix host show an **Open Terminal** shortcut directly in the VM table.
 - Users with the **Manage Nutanix VMs** permission (`nutanix.manage`) can power VMs ON or OFF and import unlinked VMs into Termix under the configured folder (default `Nutanix VMs`).
 - The plugin also registers `nutanix.summary`, `nutanix.list-vms`, and `nutanix.power-vm` actions in Termix Operations Center.

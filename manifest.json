@@ -12,7 +12,8 @@
   "category": "Infrastructure",
   "icon": "Server",
   "features": [
-    "Cluster, AHV host, and storage container telemetry from Prism Central and Prism Element",
+    "Cluster, AHV node CPU/RAM/disk usage, expandable node VM overview, and storage container telemetry from Prism Central and Prism Element",
+    "Per-VM live CPU, RAM, allocated vDisk usage, and storage controller IOPS/bandwidth telemetry",
     "Virtual machine inventory with multi-NIC IP matching against Termix hosts",
     "VM power control (ON / OFF) with audit logging and Operations Center integration",
     "One-click import of discovered VMs into a configurable Termix host folder"

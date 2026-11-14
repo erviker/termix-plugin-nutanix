@@ -16,7 +16,8 @@
 
 ## Features
 
-- **Infrastructure Inventory:** Live summary of clusters, AHV hypervisor hosts, storage containers, memory usage, and storage capacity.
+- **Infrastructure Inventory:** Live summary of clusters, per-node AHV CPU/RAM/disk usage, expandable per-node VM overviews, and storage container capacity.
+- **Per-VM Telemetry:** Displays per-VM CPU usage, guest/host RAM usage, allocated vDisk utilization, and storage controller IOPS/bandwidth directly in the VMs table and node VM overview.
 - **Smart Termix Host Matching:** Matches VMs across all discovered NIC IP addresses with a case-insensitive name fallback, providing direct **Open Terminal** actions from the VM table.
 - **VM Power Control:** Power VMs ON and OFF with Prism optimistic-locking checks, RBAC enforcement (`nutanix.manage`), and Termix audit logging.
 - **One-Click VM Import:** Import discovered VMs that are not yet in Termix into a configurable folder (`Nutanix VMs` by default).
