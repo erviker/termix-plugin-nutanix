@@ -73,12 +73,12 @@ function usageTone(pct: number | null): "default" | "ok" | "warn" | "bad" {
   return "ok";
 }
 
-function toneBarClass(pct: number | null): string {
+function toneBarColor(pct: number | null): string {
   const tone = usageTone(pct);
-  if (tone === "bad") return "bg-destructive";
-  if (tone === "warn") return "bg-amber-500";
-  if (tone === "ok") return "bg-emerald-500";
-  return "bg-primary";
+  if (tone === "bad") return "#f43f5e";
+  if (tone === "warn") return "#f59e0b";
+  if (tone === "ok") return "#10b981";
+  return "#38bdf8";
 }
 
 function MetricProgress({
@@ -93,7 +93,7 @@ function MetricProgress({
   const clamped =
     percent === null ? 0 : Math.max(0, Math.min(100, Math.round(percent)));
   return (
-    <div className="min-w-24">
+    <div style={{ minWidth: "96px" }}>
       <div className="flex items-baseline justify-between gap-2 tabular-nums">
         <span className="font-medium">{primary}</span>
         {percent !== null && (
@@ -101,10 +101,21 @@ function MetricProgress({
         )}
       </div>
       {percent !== null && (
-        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="mt-1 w-full overflow-hidden rounded-full"
+          style={{
+            height: "6px",
+            backgroundColor: "rgba(128, 128, 128, 0.24)",
+          }}
+        >
           <div
-            className={`h-full rounded-full ${toneBarClass(percent)}`}
-            style={{ width: `${clamped}%` }}
+            style={{
+              height: "100%",
+              width: `${clamped}%`,
+              minWidth: clamped > 0 ? "3px" : undefined,
+              borderRadius: "9999px",
+              backgroundColor: toneBarColor(percent),
+            }}
           />
         </div>
       )}
