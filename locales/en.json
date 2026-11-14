@@ -1,0 +1,140 @@
+{
+  "plugin": {
+    "name": "Nutanix",
+    "description": "Monitor Nutanix Prism clusters, AHV hosts, storage containers, and virtual machines, control VM power state, and import VMs into Termix."
+  },
+  "tab": {
+    "title": "Nutanix",
+    "subtitle": "Nutanix Prism Central and Prism Element infrastructure overview",
+    "refresh": "Refresh",
+    "importAll": "Import Missing VMs",
+    "importing": "Importing...",
+    "notConfiguredTitle": "Nutanix connection is not configured",
+    "notConfiguredBody": "Configure the Prism Central URL, username, and password in Settings -> Plugins -> Nutanix.",
+    "searchPlaceholder": "Search VMs by name, IP, cluster, or host...",
+    "allClusters": "All Clusters",
+    "tabs": {
+      "vms": "Virtual Machines",
+      "hosts": "AHV Hosts",
+      "containers": "Storage Containers",
+      "clusters": "Clusters"
+    },
+    "stats": {
+      "clusters": "Clusters",
+      "hosts": "AHV Hosts",
+      "vms": "Virtual Machines",
+      "vmsRunning": "{{count}} running",
+      "memory": "Memory Usage",
+      "storage": "Storage Usage"
+    },
+    "vm": {
+      "name": "Name",
+      "cluster": "Cluster",
+      "host": "AHV Host",
+      "power": "Power",
+      "vcpus": "vCPUs",
+      "memory": "Memory",
+      "ip": "IP Addresses",
+      "linkedHost": "Termix Host",
+      "actions": "Actions",
+      "powerOn": "Power On",
+      "powerOff": "Power Off",
+      "connect": "Open Terminal",
+      "importOne": "Import",
+      "imported": "Imported",
+      "unlinked": "Not in Termix",
+      "empty": "No virtual machines match the current filter."
+    },
+    "host": {
+      "name": "Host",
+      "cluster": "Cluster",
+      "controllerIp": "CVM IP",
+      "hypervisor": "Hypervisor",
+      "cpu": "CPU",
+      "memory": "Memory",
+      "vms": "VMs",
+      "serial": "Serial",
+      "empty": "No AHV hosts found."
+    },
+    "container": {
+      "name": "Container",
+      "rf": "RF",
+      "compression": "Compression",
+      "used": "Used",
+      "free": "Free",
+      "capacity": "Capacity",
+      "empty": "No storage containers found."
+    },
+    "cluster": {
+      "name": "Cluster",
+      "version": "AOS Version",
+      "externalIp": "Virtual IP",
+      "nodes": "Nodes",
+      "services": "Services",
+      "empty": "No clusters found."
+    },
+    "messages": {
+      "loadError": "Failed to load Nutanix inventory.",
+      "powerSuccess": "Set VM {{name}} power state to {{state}}.",
+      "powerError": "Failed to change VM power state.",
+      "importSuccess": "Imported {{created}} VMs ({{skipped}} already present).",
+      "importError": "Failed to import VMs into Termix."
+    }
+  },
+  "permissions": {
+    "view": {
+      "title": "View Nutanix inventory",
+      "description": "Open the Nutanix tab and view clusters, hosts, storage containers, and virtual machines."
+    },
+    "manage": {
+      "title": "Manage Nutanix VMs",
+      "description": "Power VMs on or off and import discovered VMs into Termix."
+    }
+  },
+  "settings": {
+    "admin": {
+      "prismUrl": {
+        "label": "Prism Central URL",
+        "description": "Base URL for Nutanix Prism Central (e.g. https://prism.example.com:9440).",
+        "placeholder": "https://prism.example.com:9440"
+      },
+      "peUrl": {
+        "label": "Prism Element URL (optional)",
+        "description": "Optional base URL for Prism Element (AOS v2 API) to include storage containers and per-host telemetry.",
+        "placeholder": "https://cluster.example.com:9440"
+      },
+      "username": {
+        "label": "Username",
+        "description": "Prism Central / Prism Element account username."
+      },
+      "password": {
+        "label": "Password",
+        "description": "Prism Central / Prism Element account password."
+      },
+      "allowInsecureTls": {
+        "label": "Allow self-signed TLS certificates",
+        "description": "Enable only if your Prism Central or Prism Element endpoint uses a self-signed or untrusted certificate."
+      },
+      "defaultFolder": {
+        "label": "Default import folder",
+        "description": "Termix host folder name assigned to VMs imported from Nutanix."
+      }
+    }
+  },
+  "operations": {
+    "summary": {
+      "title": "Nutanix Cluster Summary"
+    },
+    "listVms": {
+      "title": "List Nutanix VMs",
+      "cluster": "Cluster filter (optional)"
+    },
+    "powerVm": {
+      "title": "Set Nutanix VM Power State",
+      "uuid": "VM UUID",
+      "state": "Target Power State",
+      "stateOn": "Power On (ON)",
+      "stateOff": "Power Off (OFF)"
+    }
+  }
+}

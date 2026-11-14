@@ -1,0 +1,169 @@
+{
+  "id": "nutanix",
+  "name": "Nutanix",
+  "version": "1.0.0",
+  "description": "Monitor Nutanix Prism clusters, AHV hosts, storage containers, and virtual machines, control VM power state, and import VMs into Termix.",
+  "author": {
+    "name": "erviker"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/erviker/termix-plugin-nutanix",
+  "docs": "https://github.com/erviker/termix-plugin-nutanix/tree/main/docs",
+  "category": "Infrastructure",
+  "icon": "Server",
+  "features": [
+    "Cluster, AHV host, and storage container telemetry from Prism Central and Prism Element",
+    "Virtual machine inventory with multi-NIC IP matching against Termix hosts",
+    "VM power control (ON / OFF) with audit logging and Operations Center integration",
+    "One-click import of discovered VMs into a configurable Termix host folder"
+  ],
+  "env": [],
+  "engine": {
+    "termix": ">=26.11.2-0",
+    "api": "^2.0.0"
+  },
+  "capabilities": [
+    "network:serve",
+    "network:outbound",
+    "hosts:read",
+    "hosts:write",
+    "ui:surface",
+    "operations:provide"
+  ],
+  "sandbox": {
+    "schedules": [],
+    "events": []
+  },
+  "contributes": {
+    "tabs": [
+      {
+        "id": "nutanix",
+        "titleKey": "tab.title",
+        "icon": "Server",
+        "openFrom": ["rail"]
+      }
+    ],
+    "permissions": [
+      {
+        "name": "view",
+        "titleKey": "permissions.view.title",
+        "descriptionKey": "permissions.view.description",
+        "defaultRoles": ["admin", "user"]
+      },
+      {
+        "name": "manage",
+        "titleKey": "permissions.manage.title",
+        "descriptionKey": "permissions.manage.description",
+        "defaultRoles": ["admin"]
+      }
+    ],
+    "settings": {
+      "admin": [
+        {
+          "key": "prismUrl",
+          "type": "string",
+          "labelKey": "settings.admin.prismUrl.label",
+          "descriptionKey": "settings.admin.prismUrl.description",
+          "placeholderKey": "settings.admin.prismUrl.placeholder",
+          "default": ""
+        },
+        {
+          "key": "peUrl",
+          "type": "string",
+          "labelKey": "settings.admin.peUrl.label",
+          "descriptionKey": "settings.admin.peUrl.description",
+          "placeholderKey": "settings.admin.peUrl.placeholder",
+          "default": ""
+        },
+        {
+          "key": "username",
+          "type": "string",
+          "labelKey": "settings.admin.username.label",
+          "descriptionKey": "settings.admin.username.description",
+          "default": ""
+        },
+        {
+          "key": "password",
+          "type": "secret",
+          "labelKey": "settings.admin.password.label",
+          "descriptionKey": "settings.admin.password.description",
+          "default": ""
+        },
+        {
+          "key": "allowInsecureTls",
+          "type": "boolean",
+          "labelKey": "settings.admin.allowInsecureTls.label",
+          "descriptionKey": "settings.admin.allowInsecureTls.description",
+          "default": false
+        },
+        {
+          "key": "defaultFolder",
+          "type": "string",
+          "labelKey": "settings.admin.defaultFolder.label",
+          "descriptionKey": "settings.admin.defaultFolder.description",
+          "default": "Nutanix VMs"
+        }
+      ]
+    },
+    "operations": {
+      "actions": [
+        {
+          "id": "nutanix.summary",
+          "titleKey": "operations.summary.title",
+          "icon": "Server",
+          "scope": "server",
+          "risk": "read",
+          "permission": "view",
+          "surfaces": {
+            "palette": true
+          }
+        },
+        {
+          "id": "nutanix.list-vms",
+          "titleKey": "operations.listVms.title",
+          "icon": "Monitor",
+          "scope": "server",
+          "risk": "read",
+          "permission": "view",
+          "inputs": [
+            {
+              "key": "cluster",
+              "type": "string",
+              "labelKey": "operations.listVms.cluster",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "nutanix.power-vm",
+          "titleKey": "operations.powerVm.title",
+          "icon": "Power",
+          "scope": "server",
+          "risk": "change",
+          "permission": "manage",
+          "dryRun": "describe",
+          "inputs": [
+            {
+              "key": "uuid",
+              "type": "string",
+              "labelKey": "operations.powerVm.uuid",
+              "required": true
+            },
+            {
+              "key": "state",
+              "type": "select",
+              "labelKey": "operations.powerVm.state",
+              "required": true,
+              "options": [
+                { "value": "ON", "labelKey": "operations.powerVm.stateOn" },
+                { "value": "OFF", "labelKey": "operations.powerVm.stateOff" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "locales": "locales",
+  "platforms": ["linux", "win32", "darwin"]
+}

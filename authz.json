@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Termix-SSH/Termix/main/scripts/authz/authz.schema.json",
+  "routes": {
+    "GET /plugin-api/nutanix/status": {
+      "access": "user",
+      "permission": "nutanix.view",
+      "note": "Returns Nutanix cluster, host, storage, and VM inventory or an unconfigured payload when settings are empty"
+    },
+    "GET /plugin-api/nutanix/vms": {
+      "access": "user",
+      "permission": "nutanix.view",
+      "note": "Lists discovered Nutanix VMs matched against Termix hosts"
+    },
+    "POST /plugin-api/nutanix/vms/:uuid/power": {
+      "access": "user",
+      "permission": "nutanix.manage",
+      "params": {
+        "uuid": "00000000-0000-0000-0000-000000000000"
+      },
+      "body": {
+        "state": "ON"
+      },
+      "destructive": true,
+      "allowed": "any",
+      "note": "Power action requires a live Nutanix Prism Central appliance; verifies auth and RBAC refusal paths"
+    },
+    "POST /plugin-api/nutanix/import-vms": {
+      "access": "user",
+      "permission": "nutanix.manage",
+      "body": {
+        "uuids": []
+      },
+      "destructive": true,
+      "allowed": "any",
+      "note": "VM import requires a live Nutanix Prism Central appliance; verifies auth and RBAC refusal paths"
+    }
+  }
+}
