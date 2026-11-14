@@ -249,6 +249,14 @@ function buildVmTelemetry(
   const peStats = (peVm?.stats ?? {}) as Record<string, unknown>;
   const readMetric = (key: string) => pcStats?.[key] ?? peStats[key];
   const diskCapacityBytes = computeVmDiskCapacity(res, peVm);
+  const diskUsedBytes = toNullableMetric(readMetric("controller_user_bytes"));
+  const diskUsagePct =
+    diskCapacityBytes > 0 && diskUsedBytes !== null
+      ? Math.min(
+          100,
+          Math.round((diskUsedBytes / diskCapacityBytes) * 1000) / 10,
+        )
+      : null;
 
   if (powerState === "OFF") {
     return {
@@ -259,8 +267,8 @@ function buildVmTelemetry(
       guestMemoryUsagePct: 0,
       memoryUsedMb: 0,
       diskCapacityBytes,
-      diskUsedBytes: toNullableMetric(readMetric("controller_user_bytes")),
-      diskUsagePct: null,
+      diskUsedBytes,
+      diskUsagePct,
       iops: 0,
       ioBandwidthKbps: 0,
       ioLatencyUs: null,
@@ -277,15 +285,6 @@ function buildVmTelemetry(
   const memoryUsedMb =
     memoryUsagePct !== null && memoryMb > 0
       ? Math.round((memoryMb * memoryUsagePct) / 100)
-      : null;
-
-  const diskUsedBytes = toNullableMetric(readMetric("controller_user_bytes"));
-  const diskUsagePct =
-    diskCapacityBytes > 0 && diskUsedBytes !== null
-      ? Math.min(
-          100,
-          Math.round((diskUsedBytes / diskCapacityBytes) * 1000) / 10,
-        )
       : null;
 
   return {
