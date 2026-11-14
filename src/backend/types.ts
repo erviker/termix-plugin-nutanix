@@ -16,19 +16,50 @@ export interface NutanixCluster {
   services: string[];
 }
 
+export interface NutanixNodeVmSummary {
+  uuid: string;
+  name: string;
+  powerState: "ON" | "OFF" | string;
+  numVcpus: number;
+  memoryMb: number;
+  primaryIp: string | null;
+  linkedHostId: number | null;
+}
+
+export interface NutanixNodeVmOverview {
+  total: number;
+  running: number;
+  stopped: number;
+  linkedToTermix: number;
+  allocatedVcpus: number;
+  allocatedMemoryMb: number;
+  vms: NutanixNodeVmSummary[];
+}
+
 export interface NutanixHost {
   uuid: string;
   name: string;
   clusterName: string;
+  hypervisorAddress: string;
   controllerIp: string;
   hypervisorVersion: string;
   numCpuCores: number;
   numCpuSockets: number;
+  cpuCapacityHz: number;
   memoryBytes: number;
+  memoryUsedBytes: number;
   cpuUsagePct: number | null;
   memoryUsagePct: number | null;
+  diskCapacityBytes: number;
+  diskUsedBytes: number;
+  diskFreeBytes: number;
+  diskUsagePct: number | null;
+  iops: number;
+  ioBandwidthKbps: number;
   numVms: number;
   serial: string;
+  state: string;
+  vmOverview: NutanixNodeVmOverview;
 }
 
 export interface NutanixStorageContainer {
@@ -48,6 +79,7 @@ export interface NutanixVm {
   name: string;
   description: string;
   clusterName: string;
+  hostUuid: string;
   hostName: string;
   powerState: "ON" | "OFF" | string;
   numVcpus: number;
@@ -65,6 +97,8 @@ export interface NutanixSummary {
   vmCount: number;
   runningVms: number;
   stoppedVms: number;
+  totalCpuCores: number;
+  cpuUsagePct: number | null;
   totalMemoryBytes: number;
   usedMemoryBytes: number;
   totalStorageBytes: number;

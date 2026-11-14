@@ -62,6 +62,13 @@ function formatMemoryMb(mb: number): string {
   return `${mb} MiB`;
 }
 
+function usageTone(pct: number | null): "default" | "ok" | "warn" | "bad" {
+  if (pct === null) return "default";
+  if (pct >= 85) return "bad";
+  if (pct >= 70) return "warn";
+  return "ok";
+}
+
 function createTab(app: TermixApp) {
   return function NutanixTab({ isVisible }: TabProps) {
     const { t } = useTranslation();
@@ -77,6 +84,9 @@ function createTab(app: TermixApp) {
     const [activeView, setActiveView] = useState<SubView>("vms");
     const [search, setSearch] = useState("");
     const [selectedCluster, setSelectedCluster] = useState<string>("all");
+    const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>(
+      {},
+    );
 
     const load = useCallback(
       async (force = false) => {
@@ -222,13 +232,15 @@ function createTab(app: TermixApp) {
     const summary = status?.summary;
     const memoryPct =
       summary && summary.totalMemoryBytes > 0
-        ? Math.round((summary.usedMemoryBytes / summary.totalMemoryBytes) * 100)
+        ? Math.round(
+            (summary.usedMemoryBytes / summary.totalMemoryBytes) * 1000,
+          ) / 10
         : null;
     const storagePct =
       summary && summary.totalStorageBytes > 0
         ? Math.round(
-            (summary.usedStorageBytes / summary.totalStorageBytes) * 100,
-          )
+            (summary.usedStorageBytes / summary.totalStorageBytes) * 1000,
+          ) / 10
         : null;
 
     return (
@@ -272,8 +284,20 @@ function createTab(app: TermixApp) {
             <StatTile
               label={t("tab.stats.clusters")}
               value={summary.clusterCount}
+              hint={`${summary.hostCount} ${t("tab.stats.hosts")}`}
             />
-            <StatTile label={t("tab.stats.hosts")} value={summary.hostCount} />
+            <StatTile
+              label={t("tab.stats.cpu")}
+              value={
+                summary.cpuUsagePct !== null ? `${summary.cpuUsagePct}%` : "-"
+              }
+              percent={summary.cpuUsagePct}
+              tone={usageTone(summary.cpuUsagePct)}
+              hint={t("tab.stats.cpuCores", {
+                cores: summary.totalCpuCores,
+                hosts: summary.hostCount,
+              })}
+            />
             <StatTile
               label={t("tab.stats.vms")}
               value={summary.vmCount}
@@ -292,6 +316,7 @@ function createTab(app: TermixApp) {
                   : undefined
               }
               percent={memoryPct}
+              tone={usageTone(memoryPct)}
             />
             <StatTile
               label={t("tab.stats.storage")}
@@ -306,6 +331,7 @@ function createTab(app: TermixApp) {
                   : undefined
               }
               percent={storagePct}
+              tone={usageTone(storagePct)}
             />
           </div>
         )}
@@ -502,70 +528,233 @@ function createTab(app: TermixApp) {
         )}
 
         {activeView === "hosts" && (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex flex-col gap-4">
             {!status || status.hosts.length === 0 ? (
               <EmptyState title={t("tab.host.empty")} />
             ) : (
-              status.hosts.map((host) => (
-                <Card key={host.uuid}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-base">{host.name}</CardTitle>
-                      {host.clusterName && (
-                        <Badge variant="outline">{host.clusterName}</Badge>
+              status.hosts.map((host) => {
+                const nodeKey = host.uuid || host.name;
+                const isExpanded =
+                  expandedNodes[nodeKey] ?? status.hosts.length === 1;
+                const vmRunningPct =
+                  host.vmOverview.total > 0
+                    ? Math.round(
+                        (host.vmOverview.running / host.vmOverview.total) * 100,
+                      )
+                    : null;
+
+                return (
+                  <Card key={nodeKey}>
+                    <CardHeader className="pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CardTitle className="text-base">
+                              {host.name}
+                            </CardTitle>
+                            <StatusBadge
+                              tone={host.state === "NORMAL" ? "ok" : "warn"}
+                              state={host.state}
+                            />
+                            {host.clusterName && (
+                              <Badge variant="outline">
+                                {host.clusterName}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {host.hypervisorVersion} •{" "}
+                            {t("tab.host.hypervisorIp")}:{" "}
+                            <span className="font-mono">
+                              {host.hypervisorAddress || "-"}
+                            </span>{" "}
+                            • {t("tab.host.controllerIp")}:{" "}
+                            <span className="font-mono">
+                              {host.controllerIp || "-"}
+                            </span>{" "}
+                            • {t("tab.host.serial")}:{" "}
+                            <span className="font-mono">
+                              {host.serial || "-"}
+                            </span>
+                          </p>
+                        </div>
+                        {host.vmOverview.vms.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setExpandedNodes((prev) => ({
+                                ...prev,
+                                [nodeKey]: !isExpanded,
+                              }))
+                            }
+                          >
+                            {isExpanded
+                              ? t("tab.host.hideVms", {
+                                  count: host.vmOverview.vms.length,
+                                })
+                              : t("tab.host.showVms", {
+                                  count: host.vmOverview.vms.length,
+                                })}
+                          </Button>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <StatTile
+                          label={t("tab.host.cpu")}
+                          value={
+                            host.cpuUsagePct !== null
+                              ? `${host.cpuUsagePct}%`
+                              : "-"
+                          }
+                          percent={host.cpuUsagePct}
+                          tone={usageTone(host.cpuUsagePct)}
+                          hint={t("tab.host.cpuCoresHint", {
+                            cores: host.numCpuCores,
+                            sockets: host.numCpuSockets,
+                          })}
+                        />
+                        <StatTile
+                          label={t("tab.host.memory")}
+                          value={
+                            host.memoryUsedBytes > 0
+                              ? formatBytes(host.memoryUsedBytes)
+                              : formatBytes(host.memoryBytes)
+                          }
+                          unit={
+                            host.memoryBytes > 0
+                              ? `/ ${formatBytes(host.memoryBytes)}`
+                              : undefined
+                          }
+                          percent={host.memoryUsagePct}
+                          tone={usageTone(host.memoryUsagePct)}
+                          hint={
+                            host.memoryUsagePct !== null
+                              ? `${host.memoryUsagePct}%`
+                              : undefined
+                          }
+                        />
+                        <StatTile
+                          label={t("tab.host.disk")}
+                          value={
+                            host.diskCapacityBytes > 0
+                              ? formatBytes(host.diskUsedBytes)
+                              : "-"
+                          }
+                          unit={
+                            host.diskCapacityBytes > 0
+                              ? `/ ${formatBytes(host.diskCapacityBytes)}`
+                              : undefined
+                          }
+                          percent={host.diskUsagePct}
+                          tone={usageTone(host.diskUsagePct)}
+                          hint={
+                            host.diskCapacityBytes > 0
+                              ? t("tab.host.diskHint", {
+                                  free: formatBytes(host.diskFreeBytes),
+                                  iops: host.iops,
+                                })
+                              : undefined
+                          }
+                        />
+                        <StatTile
+                          label={t("tab.host.vmsOverview")}
+                          value={`${host.vmOverview.running} / ${host.vmOverview.total}`}
+                          percent={vmRunningPct}
+                          tone="ok"
+                          hint={t("tab.host.vmsHint", {
+                            vcpus: host.vmOverview.allocatedVcpus,
+                            memory: formatMemoryMb(
+                              host.vmOverview.allocatedMemoryMb,
+                            ),
+                            linked: host.vmOverview.linkedToTermix,
+                          })}
+                        />
+                      </div>
+
+                      {isExpanded && host.vmOverview.vms.length > 0 && (
+                        <div className="overflow-x-auto rounded-md border border-border">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-border text-left text-muted-foreground">
+                                <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.name")}
+                                </th>
+                                <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.power")}
+                                </th>
+                                <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.vcpus")}
+                                </th>
+                                <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.memory")}
+                                </th>
+                                <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.ip")}
+                                </th>
+                                <th className="px-3 py-2 text-right font-medium">
+                                  {t("tab.vm.actions")}
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {host.vmOverview.vms.map((nodeVm) => {
+                                const linkedHost = nodeVm.linkedHostId
+                                  ? app.getHost(nodeVm.linkedHostId)
+                                  : undefined;
+                                return (
+                                  <tr
+                                    key={nodeVm.uuid}
+                                    className="border-b border-border/50 last:border-0"
+                                  >
+                                    <td className="px-3 py-1.5 font-medium">
+                                      {nodeVm.name}
+                                    </td>
+                                    <td className="px-3 py-1.5">
+                                      <StatusBadge
+                                        tone={
+                                          nodeVm.powerState === "ON"
+                                            ? "ok"
+                                            : "idle"
+                                        }
+                                        state={nodeVm.powerState}
+                                      />
+                                    </td>
+                                    <td className="px-3 py-1.5">
+                                      {nodeVm.numVcpus}
+                                    </td>
+                                    <td className="px-3 py-1.5">
+                                      {formatMemoryMb(nodeVm.memoryMb)}
+                                    </td>
+                                    <td className="px-3 py-1.5 font-mono">
+                                      {nodeVm.primaryIp || "-"}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-right">
+                                      {linkedHost && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() =>
+                                            app.tabs.connectHost(linkedHost)
+                                          }
+                                        >
+                                          {t("tab.vm.connect")}
+                                        </Button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">
-                        {t("tab.host.hypervisor")}:{" "}
-                      </span>
-                      {host.hypervisorVersion}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">
-                        {t("tab.host.controllerIp")}:{" "}
-                      </span>
-                      <span className="font-mono text-xs">
-                        {host.controllerIp || "-"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">
-                        {t("tab.host.cpu")}:{" "}
-                      </span>
-                      {host.numCpuCores} cores
-                      {host.cpuUsagePct !== null
-                        ? ` (${host.cpuUsagePct}%)`
-                        : ""}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">
-                        {t("tab.host.memory")}:{" "}
-                      </span>
-                      {formatBytes(host.memoryBytes)}
-                      {host.memoryUsagePct !== null
-                        ? ` (${host.memoryUsagePct}%)`
-                        : ""}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">
-                        {t("tab.host.vms")}:{" "}
-                      </span>
-                      {host.numVms}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">
-                        {t("tab.host.serial")}:{" "}
-                      </span>
-                      <span className="font-mono text-xs">
-                        {host.serial || "-"}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+                    </CardContent>
+                  </Card>
+                );
+              })
             )}
           </div>
         )}

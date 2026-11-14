@@ -86,7 +86,7 @@ const SAMPLE_VMS = {
           num_sockets: 2,
           num_vcpus_per_socket: 2,
           memory_size_mib: 8192,
-          host_reference: { name: "ahv-node-01" },
+          host_reference: { uuid: "ahv-host-0001", name: "ahv-node-01" },
           nic_list: [
             { ip_endpoint_list: [{ ip: "10.10.10.20" }] },
             { ip_endpoint_list: [{ ip: "10.0.1.50" }] },
@@ -144,9 +144,16 @@ const SAMPLE_PE_HOSTS = {
       name: "ahv-node-01",
       cluster_uuid: "cluster-uuid-0001",
       memory_capacity_in_bytes: 274_877_906_944,
-      usage_stats: {
-        hypervisor_cpu_usage_ppm: 250_000,
+      stats: {
+        hypervisor_cpu_usage_ppm: 254_000,
         hypervisor_memory_usage_ppm: 600_000,
+        controller_num_iops: 512,
+        controller_io_bandwidth_kBps: 8192,
+      },
+      usage_stats: {
+        "storage.capacity_bytes": "20000000000000",
+        "storage.usage_bytes": "10000000000000",
+        "storage.free_bytes": "10000000000000",
       },
       num_vms: 3,
       serial: "SN-AHV-01",
@@ -329,8 +336,18 @@ describe("nutanix backend routes", () => {
     expect(res.body.clusters[0].name).toBe("prod-ahv-01");
     expect(res.body.hosts[0]).toMatchObject({
       name: "ahv-node-01",
-      cpuUsagePct: 25,
+      cpuUsagePct: 25.4,
       memoryUsagePct: 60,
+      diskUsagePct: 50,
+      iops: 512,
+      vmOverview: expect.objectContaining({
+        total: 3,
+        running: 2,
+        stopped: 1,
+        linkedToTermix: 2,
+        allocatedVcpus: 10,
+        allocatedMemoryMb: 28672,
+      }),
     });
     expect(res.body.containers[0]).toMatchObject({
       name: "default-container",
@@ -343,6 +360,10 @@ describe("nutanix backend routes", () => {
       vmCount: 3,
       runningVms: 2,
       stoppedVms: 1,
+      cpuUsagePct: 25.4,
+      totalCpuCores: 32,
+      totalStorageBytes: 20_000_000_000_000,
+      usedStorageBytes: 10_000_000_000_000,
     });
 
     const vms = res.body.vms as Array<Record<string, unknown>>;

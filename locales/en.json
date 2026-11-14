@@ -15,17 +15,19 @@
     "allClusters": "All Clusters",
     "tabs": {
       "vms": "Virtual Machines",
-      "hosts": "AHV Hosts",
+      "hosts": "Nodes & Overview",
       "containers": "Storage Containers",
       "clusters": "Clusters"
     },
     "stats": {
       "clusters": "Clusters",
-      "hosts": "AHV Hosts",
+      "hosts": "AHV Nodes",
+      "cpu": "CPU Usage",
+      "cpuCores": "{{cores}} cores across {{hosts}} nodes",
       "vms": "Virtual Machines",
       "vmsRunning": "{{count}} running",
       "memory": "Memory Usage",
-      "storage": "Storage Usage"
+      "storage": "Disk Storage Usage"
     },
     "vm": {
       "name": "Name",
@@ -48,13 +50,23 @@
     "host": {
       "name": "Host",
       "cluster": "Cluster",
+      "hypervisorIp": "AHV IP",
       "controllerIp": "CVM IP",
       "hypervisor": "Hypervisor",
-      "cpu": "CPU",
-      "memory": "Memory",
+      "cpu": "CPU Usage",
+      "cpuCoresHint": "{{cores}} cores ({{sockets}} sockets)",
+      "memory": "RAM Usage",
+      "disk": "Disk Usage",
+      "diskHint": "{{free}} free • {{iops}} IOPS",
+      "vmsOverview": "VM Overview",
+      "vmsRunning": "{{running}} / {{total}} running",
+      "vmsHint": "{{vcpus}} vCPU • {{memory}} • {{linked}} in Termix",
+      "showVms": "Show VMs ({{count}})",
+      "hideVms": "Hide VMs ({{count}})",
+      "noNodeVms": "No VMs reported on this node.",
       "vms": "VMs",
       "serial": "Serial",
-      "empty": "No AHV hosts found."
+      "empty": "No AHV nodes found."
     },
     "container": {
       "name": "Container",

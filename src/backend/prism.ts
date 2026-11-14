@@ -6,6 +6,7 @@ import type {
   NutanixCluster,
   NutanixConfig,
   NutanixHost,
+  NutanixNodeVmOverview,
   NutanixStatusResponse,
   NutanixStorageContainer,
   NutanixSummary,
@@ -69,6 +70,8 @@ function emptySummary(): NutanixSummary {
     vmCount: 0,
     runningVms: 0,
     stoppedVms: 0,
+    totalCpuCores: 0,
+    cpuUsagePct: null,
     totalMemoryBytes: 0,
     usedMemoryBytes: 0,
     totalStorageBytes: 0,
@@ -158,6 +161,13 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function ppmToPct(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.round((num / 10_000) * 10) / 10;
+}
+
 function toString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -180,6 +190,67 @@ function matchTermixHost(
     if (match) return match;
   }
   return hostsByName.get(vmName.toLowerCase());
+}
+
+function buildNodeVmOverview(
+  host: {
+    uuid: string;
+    name: string;
+    hypervisorAddress: string;
+    numVms: number;
+  },
+  vms: NutanixVm[],
+  singleHostFallback: boolean,
+): NutanixNodeVmOverview {
+  const matched = vms.filter((vm) => {
+    if (vm.hostUuid && host.uuid && vm.hostUuid === host.uuid) return true;
+    if (
+      host.hypervisorAddress &&
+      vm.hostName &&
+      vm.hostName === host.hypervisorAddress
+    ) {
+      return true;
+    }
+    if (vm.hostName && host.name && vm.hostName === host.name) return true;
+    if (singleHostFallback && !vm.hostUuid && !vm.hostName) return true;
+    return false;
+  });
+
+  const sorted = [...matched].sort((a, b) => {
+    if (a.powerState === "ON" && b.powerState !== "ON") return -1;
+    if (a.powerState !== "ON" && b.powerState === "ON") return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  let running = 0;
+  let linkedToTermix = 0;
+  let allocatedVcpus = 0;
+  let allocatedMemoryMb = 0;
+  for (const vm of sorted) {
+    if (vm.powerState === "ON") running += 1;
+    if (vm.linkedHostId !== null) linkedToTermix += 1;
+    allocatedVcpus += vm.numVcpus;
+    allocatedMemoryMb += vm.memoryMb;
+  }
+
+  const total = sorted.length > 0 ? sorted.length : host.numVms;
+  return {
+    total,
+    running,
+    stopped: Math.max(0, total - running),
+    linkedToTermix,
+    allocatedVcpus,
+    allocatedMemoryMb,
+    vms: sorted.map((vm) => ({
+      uuid: vm.uuid,
+      name: vm.name,
+      powerState: vm.powerState,
+      numVcpus: vm.numVcpus,
+      memoryMb: vm.memoryMb,
+      primaryIp: vm.primaryIp,
+      linkedHostId: vm.linkedHostId,
+    })),
+  };
 }
 
 export async function collectInventory(
@@ -207,7 +278,7 @@ export async function collectInventory(
   });
 
   const [clustersRes, hostsRes, vmsRes, termixHosts] = await Promise.all([
-    prismRequest<{ entities?: Record<string, any>[] }>(
+    prismRequest<{ entities?: PrismEntity[] }>(
       ctx,
       config.prismUrl,
       config,
@@ -216,7 +287,7 @@ export async function collectInventory(
       v3ListBody(100),
       options?.signal,
     ),
-    prismRequest<{ entities?: Record<string, any>[] }>(
+    prismRequest<{ entities?: PrismEntity[] }>(
       ctx,
       config.prismUrl,
       config,
@@ -225,7 +296,7 @@ export async function collectInventory(
       v3ListBody(200),
       options?.signal,
     ),
-    prismRequest<{ entities?: Record<string, any>[] }>(
+    prismRequest<{ entities?: PrismEntity[] }>(
       ctx,
       config.prismUrl,
       config,
@@ -237,11 +308,11 @@ export async function collectInventory(
     ctx.hosts.list().catch(() => [] as PluginHostSummary[]),
   ]);
 
-  let peHostsRaw: Record<string, any>[] = [];
-  let peContainersRaw: Record<string, any>[] = [];
+  let peHostsRaw: PrismEntity[] = [];
+  let peContainersRaw: PrismEntity[] = [];
   if (config.peUrl) {
     const [peHostsResult, peContainersResult] = await Promise.allSettled([
-      prismRequest<{ entities?: Record<string, any>[] }>(
+      prismRequest<{ entities?: PrismEntity[] }>(
         ctx,
         config.peUrl,
         config,
@@ -250,7 +321,7 @@ export async function collectInventory(
         undefined,
         options?.signal,
       ),
-      prismRequest<{ entities?: Record<string, any>[] }>(
+      prismRequest<{ entities?: PrismEntity[] }>(
         ctx,
         config.peUrl,
         config,
@@ -298,103 +369,6 @@ export async function collectInventory(
       };
     });
 
-  const peHostByUuid = new Map<string, Record<string, any>>();
-  for (const peHost of peHostsRaw) {
-    const uuid = toString(peHost.uuid);
-    if (uuid) peHostByUuid.set(uuid, peHost);
-  }
-
-  let totalMemoryBytes = 0;
-  let usedMemoryBytes = 0;
-
-  const hosts: NutanixHost[] = asArray<PrismEntity>(hostsRes.entities).map(
-    (entity) => {
-      const uuid = toString(entity.metadata?.uuid);
-      const res = entity.status?.resources ?? entity.spec?.resources ?? {};
-      const peHost = peHostByUuid.get(uuid);
-      const clusterUuid = toString(
-        entity.status?.cluster_reference?.uuid ??
-          entity.spec?.cluster_reference?.uuid ??
-          peHost?.cluster_uuid,
-      );
-      const memoryBytes = toNumber(
-        peHost?.memory_capacity_in_bytes ??
-          toNumber(res.memory_capacity_mib) * 1024 * 1024,
-      );
-      const memPpm = peHost?.usage_stats?.["hypervisor_memory_usage_ppm"];
-      const cpuPpm = peHost?.usage_stats?.["hypervisor_cpu_usage_ppm"];
-      const memoryUsagePct =
-        memPpm !== undefined ? Math.round(toNumber(memPpm) / 10_000) : null;
-      const cpuUsagePct =
-        cpuPpm !== undefined ? Math.round(toNumber(cpuPpm) / 10_000) : null;
-
-      totalMemoryBytes += memoryBytes;
-      if (memoryUsagePct !== null && memoryBytes > 0) {
-        usedMemoryBytes += Math.round((memoryBytes * memoryUsagePct) / 100);
-      }
-
-      return {
-        uuid,
-        name: toString(
-          entity.status?.name ?? entity.spec?.name ?? peHost?.name,
-          uuid,
-        ),
-        clusterName:
-          toString(entity.status?.cluster_reference?.name) ||
-          clusterNameByUuid.get(clusterUuid) ||
-          "",
-        controllerIp: toString(
-          peHost?.controller_vm_backplane_ip ?? res.controller_vm?.ip,
-        ),
-        hypervisorVersion: toString(
-          peHost?.hypervisor_full_name ??
-            res.hypervisor?.hypervisor_full_name ??
-            res.hypervisor?.type,
-          "AHV",
-        ),
-        numCpuCores: toNumber(peHost?.num_cpu_cores ?? res.num_cpu_cores),
-        numCpuSockets: toNumber(peHost?.num_cpu_sockets ?? res.num_cpu_sockets),
-        memoryBytes,
-        cpuUsagePct,
-        memoryUsagePct,
-        numVms: toNumber(peHost?.num_vms ?? res.num_vms),
-        serial: toString(peHost?.serial ?? res.serial_number),
-      };
-    },
-  );
-
-  let totalStorageBytes = 0;
-  let usedStorageBytes = 0;
-
-  const containers: NutanixStorageContainer[] = peContainersRaw.map((item) => {
-    const stats = item.usage_stats ?? {};
-    const capacityBytes = toNumber(
-      stats["storage.user_capacity_bytes"] ?? item.max_capacity,
-    );
-    const usedBytes = toNumber(stats["storage.user_usage_bytes"]);
-    const freeBytes = toNumber(
-      stats["storage.user_free_bytes"],
-      Math.max(0, capacityBytes - usedBytes),
-    );
-    const usagePct =
-      capacityBytes > 0 ? Math.round((usedBytes / capacityBytes) * 100) : null;
-
-    totalStorageBytes += capacityBytes;
-    usedStorageBytes += usedBytes;
-
-    return {
-      uuid: toString(item.storage_container_uuid ?? item.id),
-      name: toString(item.name, "Container"),
-      clusterUuid: toString(item.cluster_uuid),
-      replicationFactor: toNumber(item.replication_factor, 2),
-      compressionEnabled: Boolean(item.compression_enabled),
-      capacityBytes,
-      usedBytes,
-      freeBytes,
-      usagePct,
-    };
-  });
-
   const hostsByIp = new Map<string, PluginHostSummary>();
   const hostsByName = new Map<string, PluginHostSummary>();
   for (const host of termixHosts) {
@@ -415,10 +389,8 @@ export async function collectInventory(
       else if (powerState === "OFF") stoppedVms += 1;
 
       const ipList: string[] = [];
-      for (const nic of asArray<Record<string, any>>(res.nic_list)) {
-        for (const endpoint of asArray<Record<string, any>>(
-          nic.ip_endpoint_list,
-        )) {
+      for (const nic of asArray<PrismEntity>(res.nic_list)) {
+        for (const endpoint of asArray<PrismEntity>(nic.ip_endpoint_list)) {
           const ip = toString(endpoint.ip).trim();
           if (ip && !ipList.includes(ip)) ipList.push(ip);
         }
@@ -442,6 +414,7 @@ export async function collectInventory(
           toString(entity.status?.cluster_reference?.name) ||
           clusterNameByUuid.get(clusterUuid) ||
           "",
+        hostUuid: toString(res.host_reference?.uuid),
         hostName: toString(res.host_reference?.name),
         powerState,
         numVcpus: Math.max(1, numSockets * vcpusPerSocket),
@@ -453,6 +426,176 @@ export async function collectInventory(
       };
     },
   );
+
+  const peHostByUuid = new Map<string, PrismEntity>();
+  for (const peHost of peHostsRaw) {
+    const uuid = toString(peHost.uuid);
+    if (uuid) peHostByUuid.set(uuid, peHost);
+  }
+
+  let totalCpuCores = 0;
+  const cpuPctValues: number[] = [];
+  let totalMemoryBytes = 0;
+  let usedMemoryBytes = 0;
+  let hostDiskTotalBytes = 0;
+  let hostDiskUsedBytes = 0;
+
+  const rawHostsList = asArray<PrismEntity>(hostsRes.entities);
+  const singleHostFallback = rawHostsList.length === 1;
+
+  const hosts: NutanixHost[] = rawHostsList.map((entity) => {
+    const uuid = toString(entity.metadata?.uuid);
+    const res = entity.status?.resources ?? entity.spec?.resources ?? {};
+    const peHost = peHostByUuid.get(uuid);
+    const peStats = peHost?.stats ?? {};
+    const peUsage = peHost?.usage_stats ?? {};
+    const clusterUuid = toString(
+      entity.status?.cluster_reference?.uuid ??
+        entity.spec?.cluster_reference?.uuid ??
+        peHost?.cluster_uuid,
+    );
+
+    const numCpuCores = toNumber(peHost?.num_cpu_cores ?? res.num_cpu_cores);
+    const numCpuSockets = toNumber(
+      peHost?.num_cpu_sockets ?? res.num_cpu_sockets,
+    );
+    const cpuCapacityHz = toNumber(
+      peHost?.cpu_capacity_in_hz ?? res.cpu_capacity_hz,
+    );
+
+    const cpuUsagePct = ppmToPct(
+      peStats["hypervisor_cpu_usage_ppm"] ??
+        peUsage["hypervisor_cpu_usage_ppm"],
+    );
+    const memoryUsagePct = ppmToPct(
+      peStats["hypervisor_memory_usage_ppm"] ??
+        peUsage["hypervisor_memory_usage_ppm"],
+    );
+
+    const memoryBytes = toNumber(
+      peHost?.memory_capacity_in_bytes ??
+        toNumber(res.memory_capacity_mib) * 1024 * 1024,
+    );
+    const memoryUsedBytes =
+      memoryUsagePct !== null && memoryBytes > 0
+        ? Math.round((memoryBytes * memoryUsagePct) / 100)
+        : 0;
+
+    const diskCapacityBytes = toNumber(peUsage["storage.capacity_bytes"]);
+    const diskUsedBytes = toNumber(peUsage["storage.usage_bytes"]);
+    const diskFreeBytes = toNumber(
+      peUsage["storage.free_bytes"],
+      Math.max(0, diskCapacityBytes - diskUsedBytes),
+    );
+    const diskUsagePct =
+      diskCapacityBytes > 0
+        ? Math.round((diskUsedBytes / diskCapacityBytes) * 1000) / 10
+        : null;
+
+    totalCpuCores += numCpuCores;
+    if (cpuUsagePct !== null) cpuPctValues.push(cpuUsagePct);
+    totalMemoryBytes += memoryBytes;
+    usedMemoryBytes += memoryUsedBytes;
+    hostDiskTotalBytes += diskCapacityBytes;
+    hostDiskUsedBytes += diskUsedBytes;
+
+    const name = toString(
+      entity.status?.name ?? entity.spec?.name ?? peHost?.name,
+      uuid,
+    );
+    const hypervisorAddress = toString(
+      peHost?.hypervisor_address ?? res.hypervisor?.ip,
+    );
+    const numVms = toNumber(peHost?.num_vms ?? res.hypervisor?.num_vms);
+
+    return {
+      uuid,
+      name,
+      clusterName:
+        toString(entity.status?.cluster_reference?.name) ||
+        clusterNameByUuid.get(clusterUuid) ||
+        "",
+      hypervisorAddress,
+      controllerIp: toString(
+        peHost?.controller_vm_backplane_ip ?? res.controller_vm?.ip,
+      ),
+      hypervisorVersion: toString(
+        peHost?.hypervisor_full_name ??
+          res.hypervisor?.hypervisor_full_name ??
+          res.hypervisor?.type,
+        "AHV",
+      ),
+      numCpuCores,
+      numCpuSockets,
+      cpuCapacityHz,
+      memoryBytes,
+      memoryUsedBytes,
+      cpuUsagePct,
+      memoryUsagePct,
+      diskCapacityBytes,
+      diskUsedBytes,
+      diskFreeBytes,
+      diskUsagePct,
+      iops: toNumber(peStats["controller_num_iops"]),
+      ioBandwidthKbps: toNumber(peStats["controller_io_bandwidth_kBps"]),
+      numVms,
+      serial: toString(peHost?.serial ?? res.serial_number),
+      state: toString(peHost?.state ?? res.host_type, "NORMAL"),
+      vmOverview: buildNodeVmOverview(
+        { uuid, name, hypervisorAddress, numVms },
+        vms,
+        singleHostFallback,
+      ),
+    };
+  });
+
+  let containerStorageTotalBytes = 0;
+  let containerStorageUsedBytes = 0;
+
+  const containers: NutanixStorageContainer[] = peContainersRaw.map((item) => {
+    const stats = item.usage_stats ?? {};
+    const capacityBytes = toNumber(
+      stats["storage.user_capacity_bytes"] ?? item.max_capacity,
+    );
+    const usedBytes = toNumber(stats["storage.user_usage_bytes"]);
+    const freeBytes = toNumber(
+      stats["storage.user_free_bytes"],
+      Math.max(0, capacityBytes - usedBytes),
+    );
+    const usagePct =
+      capacityBytes > 0
+        ? Math.round((usedBytes / capacityBytes) * 1000) / 10
+        : null;
+
+    containerStorageTotalBytes += capacityBytes;
+    containerStorageUsedBytes += usedBytes;
+
+    return {
+      uuid: toString(item.storage_container_uuid ?? item.id),
+      name: toString(item.name, "Container"),
+      clusterUuid: toString(item.cluster_uuid),
+      replicationFactor: toNumber(item.replication_factor, 2),
+      compressionEnabled: Boolean(item.compression_enabled),
+      capacityBytes,
+      usedBytes,
+      freeBytes,
+      usagePct,
+    };
+  });
+
+  const avgCpuUsagePct =
+    cpuPctValues.length > 0
+      ? Math.round(
+          (cpuPctValues.reduce((sum, val) => sum + val, 0) /
+            cpuPctValues.length) *
+            10,
+        ) / 10
+      : null;
+
+  const totalStorageBytes =
+    hostDiskTotalBytes > 0 ? hostDiskTotalBytes : containerStorageTotalBytes;
+  const usedStorageBytes =
+    hostDiskTotalBytes > 0 ? hostDiskUsedBytes : containerStorageUsedBytes;
 
   const payload: NutanixStatusResponse = {
     configured: true,
@@ -466,6 +609,8 @@ export async function collectInventory(
       vmCount: vms.length,
       runningVms,
       stoppedVms,
+      totalCpuCores,
+      cpuUsagePct: avgCpuUsagePct,
       totalMemoryBytes,
       usedMemoryBytes,
       totalStorageBytes,
@@ -501,7 +646,7 @@ export async function setVmPowerState(
     throw new Error("Nutanix Prism Central is not configured");
   }
 
-  const current = await prismRequest<Record<string, any>>(
+  const current = await prismRequest<PrismEntity>(
     ctx,
     config.prismUrl,
     config,

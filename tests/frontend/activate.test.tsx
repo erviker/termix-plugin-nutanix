@@ -30,6 +30,8 @@ const SAMPLE_STATUS = {
     vmCount: 2,
     runningVms: 1,
     stoppedVms: 1,
+    totalCpuCores: 32,
+    cpuUsagePct: 22.5,
     totalMemoryBytes: 137_438_953_472,
     usedMemoryBytes: 68_719_476_736,
     totalStorageBytes: 10_000_000_000_000,
@@ -50,15 +52,53 @@ const SAMPLE_STATUS = {
       uuid: "h-1",
       name: "ahv-node-01",
       clusterName: "prod-ahv-01",
+      hypervisorAddress: "10.0.0.121",
       controllerIp: "10.0.0.21",
       hypervisorVersion: "AHV 20230302",
       numCpuCores: 32,
       numCpuSockets: 2,
+      cpuCapacityHz: 64_000_000_000,
       memoryBytes: 137_438_953_472,
-      cpuUsagePct: 22,
+      memoryUsedBytes: 68_719_476_736,
+      cpuUsagePct: 22.5,
       memoryUsagePct: 50,
+      diskCapacityBytes: 10_000_000_000_000,
+      diskUsedBytes: 2_500_000_000_000,
+      diskFreeBytes: 7_500_000_000_000,
+      diskUsagePct: 25,
+      iops: 340,
+      ioBandwidthKbps: 4096,
       numVms: 2,
       serial: "SN-01",
+      state: "NORMAL",
+      vmOverview: {
+        total: 2,
+        running: 1,
+        stopped: 1,
+        linkedToTermix: 1,
+        allocatedVcpus: 6,
+        allocatedMemoryMb: 12288,
+        vms: [
+          {
+            uuid: "vm-1",
+            name: "app-01",
+            powerState: "ON",
+            numVcpus: 4,
+            memoryMb: 8192,
+            primaryIp: "10.0.1.10",
+            linkedHostId: 42,
+          },
+          {
+            uuid: "vm-2",
+            name: "db-new",
+            powerState: "OFF",
+            numVcpus: 2,
+            memoryMb: 4096,
+            primaryIp: "10.0.1.20",
+            linkedHostId: null,
+          },
+        ],
+      },
     },
   ],
   containers: [
@@ -80,6 +120,7 @@ const SAMPLE_STATUS = {
       name: "app-01",
       description: "",
       clusterName: "prod-ahv-01",
+      hostUuid: "h-1",
       hostName: "ahv-node-01",
       powerState: "ON",
       numVcpus: 4,
@@ -94,6 +135,7 @@ const SAMPLE_STATUS = {
       name: "db-new",
       description: "",
       clusterName: "prod-ahv-01",
+      hostUuid: "h-1",
       hostName: "ahv-node-01",
       powerState: "OFF",
       numVcpus: 2,
@@ -134,7 +176,7 @@ describe(`${manifest.id} activate`, () => {
     ).toBeTruthy();
   });
 
-  it("renders VMs, filters search, and triggers import/power when permitted", async () => {
+  it("renders VMs, node CPU/RAM/disk/VM overview, and triggers actions", async () => {
     const postMock = vi.fn(async (path: string) => {
       if (path === "/import-vms") {
         return { data: { created: 1, skipped: 0 } };
@@ -168,7 +210,14 @@ describe(`${manifest.id} activate`, () => {
       });
     });
 
-    // Switch sub-views
+    // Switch to Nodes & Overview view
+    fireEvent.click(screen.getByText(locales.tab.tabs.hosts));
+    expect(await screen.findByText("ahv-node-01")).toBeTruthy();
+    expect(screen.getByText(locales.tab.host.disk)).toBeTruthy();
+    expect(screen.getByText(locales.tab.host.vmsOverview)).toBeTruthy();
+    expect(screen.getByText("1 / 2")).toBeTruthy();
+
+    // Switch to Storage Containers view
     fireEvent.click(screen.getByText(locales.tab.tabs.containers));
     expect(await screen.findByText("default-container")).toBeTruthy();
   });
