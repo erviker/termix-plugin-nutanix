@@ -20,7 +20,11 @@ import {
   StatTile,
   StatusBadge,
 } from "@termix-ssh/plugin-sdk/ui";
-import type { NutanixStatusResponse, NutanixVm } from "../backend/types.js";
+import type {
+  NutanixStatusResponse,
+  NutanixVm,
+  NutanixVmTelemetry,
+} from "../backend/types.js";
 
 const TAB_ID = "nutanix";
 type SubView = "vms" | "hosts" | "containers" | "clusters";
@@ -67,6 +71,82 @@ function usageTone(pct: number | null): "default" | "ok" | "warn" | "bad" {
   if (pct >= 85) return "bad";
   if (pct >= 70) return "warn";
   return "ok";
+}
+
+function toneBarClass(pct: number | null): string {
+  const tone = usageTone(pct);
+  if (tone === "bad") return "bg-destructive";
+  if (tone === "warn") return "bg-amber-500";
+  if (tone === "ok") return "bg-emerald-500";
+  return "bg-primary";
+}
+
+function MetricProgress({
+  primary,
+  secondary,
+  percent,
+}: {
+  primary: string;
+  secondary?: string;
+  percent: number | null;
+}) {
+  const clamped =
+    percent === null ? 0 : Math.max(0, Math.min(100, Math.round(percent)));
+  return (
+    <div className="min-w-24">
+      <div className="flex items-baseline justify-between gap-2 tabular-nums">
+        <span className="font-medium">{primary}</span>
+        {percent !== null && (
+          <span className="text-xs text-muted-foreground">{percent}%</span>
+        )}
+      </div>
+      {percent !== null && (
+        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full ${toneBarClass(percent)}`}
+            style={{ width: `${clamped}%` }}
+          />
+        </div>
+      )}
+      {secondary && (
+        <div className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+          {secondary}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatVmDiskSummary(telemetry?: NutanixVmTelemetry): {
+  primary: string;
+  secondary?: string;
+  percent: number | null;
+} {
+  if (
+    !telemetry ||
+    (telemetry.diskCapacityBytes <= 0 && telemetry.diskUsedBytes === null)
+  ) {
+    return { primary: "-", percent: null };
+  }
+  const primary =
+    telemetry.diskUsedBytes !== null
+      ? formatBytes(telemetry.diskUsedBytes)
+      : formatBytes(telemetry.diskCapacityBytes);
+  const secondary =
+    telemetry.diskCapacityBytes > 0 && telemetry.diskUsedBytes !== null
+      ? `/ ${formatBytes(telemetry.diskCapacityBytes)}`
+      : undefined;
+  return { primary, secondary, percent: telemetry.diskUsagePct };
+}
+
+function formatVmIoSummary(telemetry?: NutanixVmTelemetry): string {
+  if (!telemetry) return "-";
+  const parts: string[] = [];
+  if (telemetry.iops !== null) parts.push(`${telemetry.iops} IOPS`);
+  if (telemetry.ioBandwidthKbps !== null && telemetry.ioBandwidthKbps > 0) {
+    parts.push(`${telemetry.ioBandwidthKbps} KB/s`);
+  }
+  return parts.length > 0 ? parts.join(" • ") : "-";
 }
 
 function createTab(app: TermixApp) {
@@ -414,6 +494,12 @@ function createTab(app: TermixApp) {
                           {t("tab.vm.memory")}
                         </th>
                         <th className="px-4 py-2.5 font-medium">
+                          {t("tab.vm.disk")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium">
+                          {t("tab.vm.io")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium">
                           {t("tab.vm.ip")}
                         </th>
                         <th className="px-4 py-2.5 font-medium">
@@ -453,9 +539,43 @@ function createTab(app: TermixApp) {
                             <td className="px-4 py-2.5 text-muted-foreground">
                               {vm.clusterName || "-"}
                             </td>
-                            <td className="px-4 py-2.5">{vm.numVcpus}</td>
                             <td className="px-4 py-2.5">
-                              {formatMemoryMb(vm.memoryMb)}
+                              <MetricProgress
+                                primary={`${vm.numVcpus} vCPU`}
+                                percent={vm.telemetry?.cpuUsagePct ?? null}
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <MetricProgress
+                                primary={
+                                  vm.telemetry?.memoryUsedMb !== null &&
+                                  vm.telemetry?.memoryUsedMb !== undefined
+                                    ? formatMemoryMb(vm.telemetry.memoryUsedMb)
+                                    : formatMemoryMb(vm.memoryMb)
+                                }
+                                secondary={
+                                  vm.telemetry?.memoryUsedMb !== null &&
+                                  vm.telemetry?.memoryUsedMb !== undefined
+                                    ? `/ ${formatMemoryMb(vm.memoryMb)}`
+                                    : undefined
+                                }
+                                percent={vm.telemetry?.memoryUsagePct ?? null}
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              {(() => {
+                                const disk = formatVmDiskSummary(vm.telemetry);
+                                return (
+                                  <MetricProgress
+                                    primary={disk.primary}
+                                    secondary={disk.secondary}
+                                    percent={disk.percent}
+                                  />
+                                );
+                              })()}
+                            </td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">
+                              {formatVmIoSummary(vm.telemetry)}
                             </td>
                             <td className="px-4 py-2.5 font-mono text-xs">
                               {vm.ipList.length > 0
@@ -692,6 +812,12 @@ function createTab(app: TermixApp) {
                                   {t("tab.vm.memory")}
                                 </th>
                                 <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.disk")}
+                                </th>
+                                <th className="px-3 py-2 font-medium">
+                                  {t("tab.vm.io")}
+                                </th>
+                                <th className="px-3 py-2 font-medium">
                                   {t("tab.vm.ip")}
                                 </th>
                                 <th className="px-3 py-2 text-right font-medium">
@@ -722,11 +848,35 @@ function createTab(app: TermixApp) {
                                         state={nodeVm.powerState}
                                       />
                                     </td>
-                                    <td className="px-3 py-1.5">
-                                      {nodeVm.numVcpus}
+                                    <td className="px-3 py-1.5 tabular-nums">
+                                      {nodeVm.numVcpus} vCPU
+                                      {nodeVm.telemetry?.cpuUsagePct !== null &&
+                                      nodeVm.telemetry?.cpuUsagePct !==
+                                        undefined
+                                        ? ` (${nodeVm.telemetry.cpuUsagePct}%)`
+                                        : ""}
                                     </td>
-                                    <td className="px-3 py-1.5">
+                                    <td className="px-3 py-1.5 tabular-nums">
                                       {formatMemoryMb(nodeVm.memoryMb)}
+                                      {nodeVm.telemetry?.memoryUsagePct !==
+                                        null &&
+                                      nodeVm.telemetry?.memoryUsagePct !==
+                                        undefined
+                                        ? ` (${nodeVm.telemetry.memoryUsagePct}%)`
+                                        : ""}
+                                    </td>
+                                    <td className="px-3 py-1.5 tabular-nums">
+                                      {(() => {
+                                        const d = formatVmDiskSummary(
+                                          nodeVm.telemetry,
+                                        );
+                                        return d.secondary
+                                          ? `${d.primary} ${d.secondary}`
+                                          : d.primary;
+                                      })()}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-muted-foreground tabular-nums">
+                                      {formatVmIoSummary(nodeVm.telemetry)}
                                     </td>
                                     <td className="px-3 py-1.5 font-mono">
                                       {nodeVm.primaryIp || "-"}

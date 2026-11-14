@@ -18,6 +18,40 @@ afterEach(async () => {
   rendered = null;
 });
 
+const TELEMETRY_ON = {
+  cpuUsagePct: 18.5,
+  cpuReadyPct: 0.1,
+  memoryUsagePct: 50,
+  hostMemoryUsagePct: 48,
+  guestMemoryUsagePct: 50,
+  memoryUsedMb: 4096,
+  diskCapacityBytes: 100_000_000_000,
+  diskUsedBytes: 40_000_000_000,
+  diskUsagePct: 40,
+  iops: 42,
+  ioBandwidthKbps: 1200,
+  ioLatencyUs: 500,
+  rxBytes: 1024,
+  txBytes: 2048,
+};
+
+const TELEMETRY_OFF = {
+  cpuUsagePct: 0,
+  cpuReadyPct: 0,
+  memoryUsagePct: 0,
+  hostMemoryUsagePct: 0,
+  guestMemoryUsagePct: 0,
+  memoryUsedMb: 0,
+  diskCapacityBytes: 50_000_000_000,
+  diskUsedBytes: 10_000_000_000,
+  diskUsagePct: null,
+  iops: 0,
+  ioBandwidthKbps: 0,
+  ioLatencyUs: null,
+  rxBytes: null,
+  txBytes: null,
+};
+
 const SAMPLE_STATUS = {
   configured: true,
   prismUrl: "https://prism.example.test:9440",
@@ -87,6 +121,7 @@ const SAMPLE_STATUS = {
             memoryMb: 8192,
             primaryIp: "10.0.1.10",
             linkedHostId: 42,
+            telemetry: TELEMETRY_ON,
           },
           {
             uuid: "vm-2",
@@ -96,6 +131,7 @@ const SAMPLE_STATUS = {
             memoryMb: 4096,
             primaryIp: "10.0.1.20",
             linkedHostId: null,
+            telemetry: TELEMETRY_OFF,
           },
         ],
       },
@@ -129,6 +165,7 @@ const SAMPLE_STATUS = {
       primaryIp: "10.0.1.10",
       linkedHostId: 42,
       linkedHostName: "app-01",
+      telemetry: TELEMETRY_ON,
     },
     {
       uuid: "vm-2",
@@ -144,6 +181,7 @@ const SAMPLE_STATUS = {
       primaryIp: "10.0.1.20",
       linkedHostId: null,
       linkedHostName: null,
+      telemetry: TELEMETRY_OFF,
     },
   ],
 };
@@ -176,7 +214,7 @@ describe(`${manifest.id} activate`, () => {
     ).toBeTruthy();
   });
 
-  it("renders VMs, node CPU/RAM/disk/VM overview, and triggers actions", async () => {
+  it("renders VMs with telemetry, node overview, and triggers actions", async () => {
     const postMock = vi.fn(async (path: string) => {
       if (path === "/import-vms") {
         return { data: { created: 1, skipped: 0 } };
@@ -196,7 +234,8 @@ describe(`${manifest.id} activate`, () => {
 
     rendered.renderTab("nutanix", { isVisible: true });
     expect(await screen.findByText("db-new")).toBeTruthy();
-    expect(screen.getAllByText("app-01").length).toBeGreaterThan(0);
+    expect(screen.getByText("18.5%")).toBeTruthy();
+    expect(screen.getByText("42 IOPS • 1200 KB/s")).toBeTruthy();
 
     fireEvent.click(screen.getByText(locales.tab.importAll));
     await waitFor(() => {
@@ -210,14 +249,11 @@ describe(`${manifest.id} activate`, () => {
       });
     });
 
-    // Switch to Nodes & Overview view
     fireEvent.click(screen.getByText(locales.tab.tabs.hosts));
     expect(await screen.findByText("ahv-node-01")).toBeTruthy();
     expect(screen.getByText(locales.tab.host.disk)).toBeTruthy();
     expect(screen.getByText(locales.tab.host.vmsOverview)).toBeTruthy();
-    expect(screen.getByText("1 / 2")).toBeTruthy();
 
-    // Switch to Storage Containers view
     fireEvent.click(screen.getByText(locales.tab.tabs.containers));
     expect(await screen.findByText("default-container")).toBeTruthy();
   });

@@ -87,6 +87,16 @@ const SAMPLE_VMS = {
           num_vcpus_per_socket: 2,
           memory_size_mib: 8192,
           host_reference: { uuid: "ahv-host-0001", name: "ahv-node-01" },
+          disk_list: [
+            {
+              device_properties: { device_type: "DISK" },
+              disk_size_bytes: 100_000_000_000,
+            },
+            {
+              device_properties: { device_type: "CDROM" },
+              disk_size_bytes: 500_000_000,
+            },
+          ],
           nic_list: [
             { ip_endpoint_list: [{ ip: "10.10.10.20" }] },
             { ip_endpoint_list: [{ ip: "10.0.1.50" }] },
@@ -236,6 +246,44 @@ async function createServer(options: {
         if (url.endsWith("/api/nutanix/v3/vms/list")) {
           return new Response(JSON.stringify(SAMPLE_VMS), { status: 200 });
         }
+        if (url.endsWith("/api/nutanix/v3/groups")) {
+          return new Response(
+            JSON.stringify({
+              group_results: [
+                {
+                  entity_results: [
+                    {
+                      entity_id: "vm-uuid-0001",
+                      data: [
+                        {
+                          name: "hypervisor_cpu_usage_ppm",
+                          values: [{ values: ["185000"] }],
+                        },
+                        {
+                          name: "guest.memory_usage_ppm",
+                          values: [{ values: ["500000"] }],
+                        },
+                        {
+                          name: "controller_num_iops",
+                          values: [{ values: ["42"] }],
+                        },
+                        {
+                          name: "controller_io_bandwidth_kBps",
+                          values: [{ values: ["1200"] }],
+                        },
+                        {
+                          name: "controller_user_bytes",
+                          values: [{ values: ["40000000000"] }],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
         if (url.endsWith("/PrismGateway/services/rest/v2.0/hosts/")) {
           return new Response(JSON.stringify(SAMPLE_PE_HOSTS), { status: 200 });
         }
@@ -366,8 +414,19 @@ describe("nutanix backend routes", () => {
       usedStorageBytes: 10_000_000_000_000,
     });
 
-    const vms = res.body.vms as Array<Record<string, unknown>>;
-    expect(vms.find((v) => v.name === "web-01")?.linkedHostId).toBe(101);
+    const vms = res.body.vms as Array<Record<string, any>>;
+    const web01 = vms.find((v) => v.name === "web-01");
+    expect(web01?.linkedHostId).toBe(101);
+    expect(web01?.telemetry).toMatchObject({
+      cpuUsagePct: 18.5,
+      memoryUsagePct: 50,
+      memoryUsedMb: 4096,
+      diskCapacityBytes: 100_000_000_000,
+      diskUsedBytes: 40_000_000_000,
+      diskUsagePct: 40,
+      iops: 42,
+      ioBandwidthKbps: 1200,
+    });
     expect(vms.find((v) => v.name === "DB-01")?.linkedHostId).toBe(102);
     expect(vms.find((v) => v.name === "worker-new")?.linkedHostId).toBeNull();
 

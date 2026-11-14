@@ -11,11 +11,25 @@ import type {
   NutanixStorageContainer,
   NutanixSummary,
   NutanixVm,
+  NutanixVmTelemetry,
 } from "./types.js";
 
 const CACHE_TTL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 export const VALID_VM_UUID_RE = /^[a-zA-Z0-9-]+$/;
+
+const VM_GROUP_ATTRIBUTES = [
+  "hypervisor_cpu_usage_ppm",
+  "hypervisor.cpu_ready_time_ppm",
+  "memory_usage_ppm",
+  "guest.memory_usage_ppm",
+  "controller_num_iops",
+  "controller_io_bandwidth_kBps",
+  "controller_avg_io_latency_usecs",
+  "controller_user_bytes",
+  "hypervisor_num_received_bytes",
+  "hypervisor_num_transmitted_bytes",
+];
 
 interface CacheEntry {
   key: string;
@@ -161,10 +175,16 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(num) ? num : fallback;
 }
 
-function ppmToPct(value: unknown): number | null {
-  if (value === undefined || value === null) return null;
+function toNullableMetric(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
+function ppmToPct(value: unknown): number | null {
+  const num = toNullableMetric(value);
+  if (num === null) return null;
   return Math.round((num / 10_000) * 10) / 10;
 }
 
@@ -177,6 +197,117 @@ type PrismEntity = Record<string, any>;
 
 function asArray<T = PrismEntity>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function parseGroupStatsByUuid(
+  groupsResponse: PrismEntity | null | undefined,
+): Map<string, Record<string, string>> {
+  const result = new Map<string, Record<string, string>>();
+  const groupResults = asArray<PrismEntity>(groupsResponse?.group_results);
+  for (const group of groupResults) {
+    for (const entity of asArray<PrismEntity>(group.entity_results)) {
+      const uuid = toString(entity.entity_id);
+      if (!uuid) continue;
+      const metrics: Record<string, string> = {};
+      for (const item of asArray<PrismEntity>(entity.data)) {
+        const key = toString(item.name);
+        const val = item.values?.[0]?.values?.[0];
+        if (key && val !== undefined && val !== null) {
+          metrics[key] = String(val);
+        }
+      }
+      result.set(uuid, metrics);
+    }
+  }
+  return result;
+}
+
+function computeVmDiskCapacity(res: PrismEntity, peVm?: PrismEntity): number {
+  let bytes = 0;
+  for (const disk of asArray<PrismEntity>(res.disk_list)) {
+    const devType = toString(disk.device_properties?.device_type).toUpperCase();
+    if (devType && devType !== "DISK") continue;
+    const diskBytes = toNumber(disk.disk_size_bytes);
+    if (diskBytes > 0) {
+      bytes += diskBytes;
+    } else {
+      const diskMib = toNumber(disk.disk_size_mib);
+      if (diskMib > 0) bytes += diskMib * 1024 * 1024;
+    }
+  }
+  if (bytes > 0) return bytes;
+  return toNumber(peVm?.diskCapacityInBytes);
+}
+
+function buildVmTelemetry(
+  powerState: string,
+  memoryMb: number,
+  res: PrismEntity,
+  pcStats: Record<string, string> | undefined,
+  peVm: PrismEntity | undefined,
+): NutanixVmTelemetry {
+  const peStats = (peVm?.stats ?? {}) as Record<string, unknown>;
+  const readMetric = (key: string) => pcStats?.[key] ?? peStats[key];
+  const diskCapacityBytes = computeVmDiskCapacity(res, peVm);
+
+  if (powerState === "OFF") {
+    return {
+      cpuUsagePct: 0,
+      cpuReadyPct: 0,
+      memoryUsagePct: 0,
+      hostMemoryUsagePct: 0,
+      guestMemoryUsagePct: 0,
+      memoryUsedMb: 0,
+      diskCapacityBytes,
+      diskUsedBytes: toNullableMetric(readMetric("controller_user_bytes")),
+      diskUsagePct: null,
+      iops: 0,
+      ioBandwidthKbps: 0,
+      ioLatencyUs: null,
+      rxBytes: null,
+      txBytes: null,
+    };
+  }
+
+  const cpuUsagePct = ppmToPct(readMetric("hypervisor_cpu_usage_ppm"));
+  const cpuReadyPct = ppmToPct(readMetric("hypervisor.cpu_ready_time_ppm"));
+  const hostMemoryUsagePct = ppmToPct(readMetric("memory_usage_ppm"));
+  const guestMemoryUsagePct = ppmToPct(readMetric("guest.memory_usage_ppm"));
+  const memoryUsagePct = guestMemoryUsagePct ?? hostMemoryUsagePct;
+  const memoryUsedMb =
+    memoryUsagePct !== null && memoryMb > 0
+      ? Math.round((memoryMb * memoryUsagePct) / 100)
+      : null;
+
+  const diskUsedBytes = toNullableMetric(readMetric("controller_user_bytes"));
+  const diskUsagePct =
+    diskCapacityBytes > 0 && diskUsedBytes !== null
+      ? Math.min(
+          100,
+          Math.round((diskUsedBytes / diskCapacityBytes) * 1000) / 10,
+        )
+      : null;
+
+  return {
+    cpuUsagePct,
+    cpuReadyPct,
+    memoryUsagePct,
+    hostMemoryUsagePct,
+    guestMemoryUsagePct,
+    memoryUsedMb,
+    diskCapacityBytes,
+    diskUsedBytes,
+    diskUsagePct,
+    iops: toNullableMetric(readMetric("controller_num_iops")),
+    ioBandwidthKbps: toNullableMetric(
+      readMetric("controller_io_bandwidth_kBps"),
+    ),
+    ioLatencyUs: toNullableMetric(
+      readMetric("controller_avg_io_latency_usecs"),
+    ),
+    rxBytes: toNullableMetric(readMetric("hypervisor_num_received_bytes")),
+    txBytes: toNullableMetric(readMetric("hypervisor_num_transmitted_bytes")),
+  };
 }
 
 function matchTermixHost(
@@ -249,6 +380,7 @@ function buildNodeVmOverview(
       memoryMb: vm.memoryMb,
       primaryIp: vm.primaryIp,
       linkedHostId: vm.linkedHostId,
+      telemetry: vm.telemetry,
     })),
   };
 }
@@ -277,66 +409,105 @@ export async function collectInventory(
     length,
   });
 
-  const [clustersRes, hostsRes, vmsRes, termixHosts] = await Promise.all([
-    prismRequest<{ entities?: PrismEntity[] }>(
-      ctx,
-      config.prismUrl,
-      config,
-      "POST",
-      "/api/nutanix/v3/clusters/list",
-      v3ListBody(100),
-      options?.signal,
-    ),
-    prismRequest<{ entities?: PrismEntity[] }>(
-      ctx,
-      config.prismUrl,
-      config,
-      "POST",
-      "/api/nutanix/v3/hosts/list",
-      v3ListBody(200),
-      options?.signal,
-    ),
-    prismRequest<{ entities?: PrismEntity[] }>(
-      ctx,
-      config.prismUrl,
-      config,
-      "POST",
-      "/api/nutanix/v3/vms/list",
-      v3ListBody(500),
-      options?.signal,
-    ),
-    ctx.hosts.list().catch(() => [] as PluginHostSummary[]),
-  ]);
+  const groupsBody = {
+    entity_type: "vm",
+    group_member_count: 500,
+    group_member_attributes: VM_GROUP_ATTRIBUTES.map((attribute) => ({
+      attribute,
+    })),
+  };
+
+  const [clustersRes, hostsRes, vmsRes, vmGroupsRes, termixHosts] =
+    await Promise.all([
+      prismRequest<{ entities?: PrismEntity[] }>(
+        ctx,
+        config.prismUrl,
+        config,
+        "POST",
+        "/api/nutanix/v3/clusters/list",
+        v3ListBody(100),
+        options?.signal,
+      ),
+      prismRequest<{ entities?: PrismEntity[] }>(
+        ctx,
+        config.prismUrl,
+        config,
+        "POST",
+        "/api/nutanix/v3/hosts/list",
+        v3ListBody(200),
+        options?.signal,
+      ),
+      prismRequest<{ entities?: PrismEntity[] }>(
+        ctx,
+        config.prismUrl,
+        config,
+        "POST",
+        "/api/nutanix/v3/vms/list",
+        v3ListBody(500),
+        options?.signal,
+      ),
+      prismRequest<PrismEntity>(
+        ctx,
+        config.prismUrl,
+        config,
+        "POST",
+        "/api/nutanix/v3/groups",
+        groupsBody,
+        options?.signal,
+      ).catch(() => null),
+      ctx.hosts.list().catch(() => [] as PluginHostSummary[]),
+    ]);
 
   let peHostsRaw: PrismEntity[] = [];
   let peContainersRaw: PrismEntity[] = [];
+  let peVmsRaw: PrismEntity[] = [];
   if (config.peUrl) {
-    const [peHostsResult, peContainersResult] = await Promise.allSettled([
-      prismRequest<{ entities?: PrismEntity[] }>(
-        ctx,
-        config.peUrl,
-        config,
-        "GET",
-        "/PrismGateway/services/rest/v2.0/hosts/",
-        undefined,
-        options?.signal,
-      ),
-      prismRequest<{ entities?: PrismEntity[] }>(
-        ctx,
-        config.peUrl,
-        config,
-        "GET",
-        "/PrismGateway/services/rest/v2.0/storage_containers/",
-        undefined,
-        options?.signal,
-      ),
-    ]);
+    const [peHostsResult, peContainersResult, peVmsResult] =
+      await Promise.allSettled([
+        prismRequest<{ entities?: PrismEntity[] }>(
+          ctx,
+          config.peUrl,
+          config,
+          "GET",
+          "/PrismGateway/services/rest/v2.0/hosts/",
+          undefined,
+          options?.signal,
+        ),
+        prismRequest<{ entities?: PrismEntity[] }>(
+          ctx,
+          config.peUrl,
+          config,
+          "GET",
+          "/PrismGateway/services/rest/v2.0/storage_containers/",
+          undefined,
+          options?.signal,
+        ),
+        prismRequest<{ entities?: PrismEntity[] }>(
+          ctx,
+          config.peUrl,
+          config,
+          "GET",
+          "/PrismGateway/services/rest/v1/vms/",
+          undefined,
+          options?.signal,
+        ),
+      ]);
     if (peHostsResult.status === "fulfilled") {
       peHostsRaw = asArray(peHostsResult.value.entities);
     }
     if (peContainersResult.status === "fulfilled") {
       peContainersRaw = asArray(peContainersResult.value.entities);
     }
+    if (peVmsResult.status === "fulfilled") {
+      peVmsRaw = asArray(peVmsResult.value.entities);
+    }
+  }
+
+  const vmGroupStatsByUuid = parseGroupStatsByUuid(vmGroupsRes);
+  const peVmByUuid = new Map<string, PrismEntity>();
+  for (const peVm of peVmsRaw) {
+    const uuid = toString(peVm.uuid);
+    if (uuid) peVmByUuid.set(uuid, peVm);
   }
 
   const clusterNameByUuid = new Map<string, string>();
@@ -398,11 +569,19 @@ export async function collectInventory(
 
       const numSockets = toNumber(res.num_sockets, 1);
       const vcpusPerSocket = toNumber(res.num_vcpus_per_socket, 1);
+      const memoryMb = toNumber(res.memory_size_mib);
       const clusterUuid = toString(
         entity.status?.cluster_reference?.uuid ??
           entity.spec?.cluster_reference?.uuid,
       );
       const linked = matchTermixHost(name, ipList, hostsByIp, hostsByName);
+      const telemetry = buildVmTelemetry(
+        powerState,
+        memoryMb,
+        res,
+        vmGroupStatsByUuid.get(uuid),
+        peVmByUuid.get(uuid),
+      );
 
       return {
         uuid,
@@ -418,11 +597,12 @@ export async function collectInventory(
         hostName: toString(res.host_reference?.name),
         powerState,
         numVcpus: Math.max(1, numSockets * vcpusPerSocket),
-        memoryMb: toNumber(res.memory_size_mib),
+        memoryMb,
         ipList,
         primaryIp: ipList.find((ip) => ip.includes(".")) ?? ipList[0] ?? null,
         linkedHostId: linked ? linked.id : null,
         linkedHostName: linked ? linked.name : null,
+        telemetry,
       };
     },
   );

@@ -16,6 +16,23 @@ export interface NutanixCluster {
   services: string[];
 }
 
+export interface NutanixVmTelemetry {
+  cpuUsagePct: number | null;
+  cpuReadyPct: number | null;
+  memoryUsagePct: number | null;
+  hostMemoryUsagePct: number | null;
+  guestMemoryUsagePct: number | null;
+  memoryUsedMb: number | null;
+  diskCapacityBytes: number;
+  diskUsedBytes: number | null;
+  diskUsagePct: number | null;
+  iops: number | null;
+  ioBandwidthKbps: number | null;
+  ioLatencyUs: number | null;
+  rxBytes: number | null;
+  txBytes: number | null;
+}
+
 export interface NutanixNodeVmSummary {
   uuid: string;
   name: string;
@@ -24,6 +41,7 @@ export interface NutanixNodeVmSummary {
   memoryMb: number;
   primaryIp: string | null;
   linkedHostId: number | null;
+  telemetry: NutanixVmTelemetry;
 }
 
 export interface NutanixNodeVmOverview {
@@ -88,6 +106,7 @@ export interface NutanixVm {
   primaryIp: string | null;
   linkedHostId: number | null;
   linkedHostName: string | null;
+  telemetry: NutanixVmTelemetry;
 }
 
 export interface NutanixSummary {
